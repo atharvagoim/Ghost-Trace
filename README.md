@@ -28,93 +28,81 @@ Team: Tanmay Dabholkar, Shirshak Dange, Aayush Doke, Atharva Goim.
 
 ## Stack
 
-React 19 + Vite + Tailwind CSS + Chart.js · FastAPI · SQLAlchemy · PostgreSQL (SQLite for local dev) · scikit-learn ·
-APScheduler · ReportLab · Docker · GitHub Actions.
+React 19 + Vite + Tailwind CSS + Motion + Chart.js · FastAPI · MongoDB (pymongo) · scikit-learn · ReportLab · Vercel.
+
+Everything lives in one folder:
 
 ```
-frontend/          React app (landing page + dashboard)
-backend/app/
-  detection/       rules.py (49 detectors), engine.py (matching, entropy, masking, diff scanning)
-  sources/         github.py (async GitHub API client)
-  ml/              features.py, train.py, scorer.py (AI risk model)
-  intel/           breach.py (XposedOrNot / HIBP / Pwned Passwords)
-  services/        scanner, alerts, monitoring scheduler, PDF reports
-  routers/         REST API
-backend/tests/     pytest suite
+app/           FastAPI backend (Python)
+  detection/     49 detectors + entropy, masking, diff scanning
+  ml/            AI risk model (model.joblib is prebuilt and committed)
+  intel/         breach lookups (XposedOrNot / HIBP / Pwned Passwords)
+  sources/       GitHub API client
+  services/      scanner, alerts, monitoring, PDF reports
+  routers/       REST API under /api
+  db.py          MongoDB access
+src/           React frontend
+scripts/       setup.mjs (one-command setup) and py.mjs (runs .venv Python)
+tests/         pytest suite (runs on an in-memory MongoDB, no server needed)
+static/        built frontend (created by npm run build, served by the API)
 ```
 
-## Run locally
+## Run it locally
 
-Requirements: Python 3.12+, Node 20+.
+You need **Python 3.11+** and **Node 20+**. Then, in this folder (PowerShell, Terminal, anything):
 
 ```bash
-# 1. Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt -r requirements-dev.txt
-cp ../.env.example .env                                 # then fill in GITHUB_TOKEN (and SMTP if you want emails)
-uvicorn app.main:app --reload                            # http://localhost:8000/docs
-
-# 2. Frontend (new terminal)
-cd frontend
-npm install
-npm run dev                                             # http://localhost:5173
+npm run setup     # one time: Python env, all packages, and a .env with a generated SECRET_KEY
+npm run dev       # API on :8000 + UI on http://localhost:5173
+npm test          # run the tests
 ```
 
-The first start trains the risk model (a few seconds) and creates a SQLite database. Open http://localhost:5173,
-create an account and run a scan.
+No virtual-environment activation needed: every command uses `.venv` automatically. If anything goes wrong
+(an interrupted install, a broken `.venv`), just run `npm run setup` again; it repairs itself and never touches your `.env`.
 
-### Configuration
+By default the app uses an in-memory database that is wiped on restart. To keep data, create a free
+[MongoDB Atlas](https://www.mongodb.com/atlas) cluster and paste its connection string into `.env`:
 
-All settings are environment variables (see `.env.example`):
-
-- `GITHUB_TOKEN`: strongly recommended. Without it GitHub allows 60 API requests an hour, enough for one small repo.
-  A classic token with no scopes works for public repos.
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`: email alerts. With Gmail, use an
-  [app password](https://myaccount.google.com/apppasswords) and `smtp.gmail.com:587`.
-- `HIBP_API_KEY`: optional; switches email lookups from XposedOrNot to Have I Been Pwned.
-- `SECRET_KEY`: required in production, used to sign login tokens.
-
-## Run with Docker
-
-```bash
-cp .env.example .env          # set SECRET_KEY, POSTGRES_PASSWORD, GITHUB_TOKEN, SMTP_*
-docker compose up -d --build  # http://localhost:8000
+```
+MONGODB_URI=mongodb+srv://user:password@cluster0.xxxxx.mongodb.net/
 ```
 
-One container serves both the API and the built React app; PostgreSQL runs alongside it.
+Add `GITHUB_TOKEN` there too (classic token, no scopes ticked) so GitHub allows more than 60 requests an hour.
 
-## Deploy to AWS EC2
+`npm run check` runs lint + tests + the production build, same as CI. To test against a real MongoDB:
+`TEST_MONGODB_URI=mongodb://localhost:27017 npm test`.
 
-1. Launch an Ubuntu EC2 instance (t3.small or larger) and open ports 80/443 in its security group.
-2. Install Docker: `curl -fsSL https://get.docker.com | sh`.
-3. `git clone https://github.com/Shirshak14/ghosttrace && cd ghosttrace`, create `.env`, set
-   `FRONTEND_URL=https://your-domain` and `CORS_ORIGINS=https://your-domain`.
-4. `docker compose up -d --build`.
-5. Put Caddy or nginx in front for HTTPS, e.g. `caddy reverse-proxy --from your-domain --to localhost:8000`.
+## Deploy to Vercel
 
-## Tests
+1. Push this folder to GitHub, then import the repo at [vercel.com/new](https://vercel.com/new). No build settings to change:
+   `vercel.json` already sets the framework (FastAPI), the build (`npm run build`) and a daily monitoring job.
+2. **Database:** in MongoDB Atlas, create a free cluster, add a database user, and under **Network Access** allow
+   `0.0.0.0/0` (Vercel has no fixed IP addresses). Copy the connection string. (Or add the *MongoDB Atlas* integration
+   from the Vercel Marketplace, which creates the cluster and sets `MONGODB_URI` for you.)
+3. **Environment variables** (Vercel → Settings → Environment Variables):
 
-```bash
-cd backend && python -m pytest -q
-cd frontend && npm run lint && npm run build
-```
+   | Variable | |
+   | --- | --- |
+   | `MONGODB_URI` | **Required.** Your Atlas connection string. |
+   | `SECRET_KEY` | **Required.** `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+   | `GITHUB_TOKEN` | Strongly recommended (60 → 5,000 GitHub requests an hour). Classic token, no scopes. |
+   | `CRON_SECRET` | Any long random string; turns on the daily monitoring job. |
+   | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | For email alerts. Gmail: `smtp.gmail.com` + an [app password](https://myaccount.google.com/apppasswords). |
 
-CI runs both on every push and pull request, then builds the Docker image.
+4. Redeploy, then open `https://<your-app>.vercel.app/api/health`. It should say `"database": "connected"`.
 
-## How the AI risk model works
+The app refuses to start on Vercel without `MONGODB_URI` and `SECRET_KEY`, so a missing setting shows up straight away
+instead of as lost data or forgeable logins.
 
-`backend/app/ml/train.py` builds a labelled dataset by rendering realistic code and config lines containing either
-real-format secrets (random values in each provider's exact format, in `.env`, settings and source files) or the decoys
-that cause false positives in keyword scanners (documentation keys such as `AKIAIOSFODNN7EXAMPLE`, `${ENV}` references,
-`your-api-key-here`, low-entropy dummies, test fixtures). Every line runs through the real detection engine, so the
-model learns from the same features it sees in production. About 4% label noise is added so boundaries stay soft.
-Held-out accuracy is about 95% (ROC AUC ≈ 0.95). Retrain with `python -m app.ml.train`.
+### What changes on Vercel
 
-Risk score = `100 × confidence^0.8 × impact(credential type) × exposure(public repo, sensitive file, history-only)`,
-mapped to critical (≥75), high (≥55), medium (≥30) and low.
+These switch on automatically when Vercel runs the app:
 
-## Responsible use
+| | Local | Vercel |
+| --- | --- | --- |
+| GitHub scans | Background thread | Run inside the browser's request to `/api/scans/{id}/run` (Vercel can freeze a function once it has responded) |
+| Scan time limit | None | Stops after 4 minutes and keeps what it found (Hobby functions max out at 5) |
+| Monitoring | Every hour | Once a day, through Vercel Cron calling `/api/cron/monitors` |
+| Uploads | 20 MB | 4 MB (Vercel's request limit is 4.5 MB) |
 
-Only scan targets you own or are authorised to assess. GhostTrace reads public data through official APIs and never
-stores raw secrets, but anything it finds should be reported to the owner and rotated, not used.
+Any of them can be overridden with an environment variable of the same name, e.g. `SCAN_TIME_BUDGET_SECONDS`.

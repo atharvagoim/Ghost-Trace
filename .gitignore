@@ -1,11 +1,20 @@
-.venv/
+# Python
+.venv*/
 __pycache__/
 *.pyc
 .pytest_cache/
-.env
-*.db
-backend/static/
+
+# Node / build output
 node_modules/
-frontend/dist/
+static/
+dist/
+*.log
+
+# Secrets and local files
+.env
+.env.*
+!.env.example
+.vercel
 .DS_Store
-backend/app/ml/model.joblib
+.idea
+.vscode/*

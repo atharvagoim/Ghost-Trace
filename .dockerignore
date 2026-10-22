@@ -1,8 +1,0 @@
-.venv
-**/node_modules
-**/__pycache__
-frontend/dist
-backend/static
-backend/*.db
-.env
-.git

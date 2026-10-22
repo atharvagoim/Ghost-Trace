@@ -1,0 +1,112 @@
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pymongo.database import Database
+
+from ..config import get_settings
+from ..db import Doc, find, find_one, get_db, insert
+from ..schemas import FindingOut, GithubScanIn, ScanOut, TextScanIn
+from ..security import get_current_user
+from ..services.alerts import alert_for_scan
+from ..services.scanner import expire_stale_scans, new_scan, persist_hits, run_github_scan, scan_text_blob, scan_upload
+from ..sources.github import GitHubError, parse_owner_target, parse_repo_target
+
+router = APIRouter(prefix="/api/scans", tags=["scans"])
+
+
+def _get_scan(db: Database, user: Doc, scan_id: int) -> Doc:
+    scan = find_one(db, "scans", {"_id": scan_id, "user_id": user.id})
+    if scan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")
+    return scan
+
+
+def _complete_inline(db: Database, scan: Doc, stats) -> Doc:
+    now = datetime.now(timezone.utc)
+    db.scans.update_one({"_id": scan.id}, {"$set": {"status": "running", "started_at": now}})
+    findings = persist_hits(db, scan, stats.hits)
+    db.scans.update_one({"_id": scan.id}, {"$set": {
+        "files_scanned": stats.files, "status": "completed", "progress": 100,
+        "finished_at": datetime.now(timezone.utc), "message": f"Scanned {stats.files} file(s)",
+    }})
+    scan = find_one(db, "scans", {"_id": scan.id})
+    alert_for_scan(db, scan, findings)
+    return scan
+
+
+@router.post("/github", response_model=ScanOut, status_code=status.HTTP_202_ACCEPTED)
+def start_github_scan(body: GithubScanIn, tasks: BackgroundTasks, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
+    try:
+        target = parse_repo_target(body.target) if body.target_type == "github_repo" else parse_owner_target(body.target)
+    except GitHubError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    expire_stale_scans(db, user.id)
+    if db.scans.count_documents({"user_id": user.id, "status": {"$in": ["queued", "running"]}}) >= 3:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "You already have 3 scans running. Wait for one to finish.")
+    scan = insert(db, "scans", new_scan(user.id, body.target_type, target, message="Queued"))
+    if not get_settings().run_scans_inline:
+        tasks.add_task(run_github_scan, scan.id, body.include_history)
+    # Otherwise (serverless) the browser starts it with POST /api/scans/{id}/run right after this returns.
+    return scan
+
+
+@router.post("/{scan_id}/run", response_model=ScanOut)
+def run_scan(scan_id: int, include_history: bool = True, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
+    """Run a queued GitHub scan inside this request and return it when done. If it is already running or finished
+    (for example a background task picked it up first) this returns immediately, so calling it twice is harmless."""
+    scan = _get_scan(db, user, scan_id)
+    if scan.status == "queued" and scan.target_type.startswith("github"):
+        run_github_scan(scan.id, include_history)
+        scan = _get_scan(db, user, scan_id)
+    return scan
+
+
+@router.post("/text", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
+def scan_text_content(body: TextScanIn, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
+    scan = insert(db, "scans", new_scan(user.id, "text", body.label or "Pasted text"))
+    return _complete_inline(db, scan, scan_text_blob(body.content, body.label or "pasted.txt", "text"))
+
+
+@router.post("/upload", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
+async def scan_file(file: UploadFile = File(...), label: str = Form(default=""), user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
+    limit_mb = get_settings().max_upload_mb
+    data = await file.read(limit_mb * 1024 * 1024 + 1)
+    if len(data) > limit_mb * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"Files must be {limit_mb} MB or smaller.")
+    name = file.filename or "upload.txt"
+    scan = insert(db, "scans", new_scan(user.id, "file", label or name))
+    try:
+        stats = scan_upload(name, data)
+    except Exception as exc:  # bad zip etc.
+        error = f"Could not read file: {exc}"
+        db.scans.update_one({"_id": scan.id}, {"$set": {"status": "failed", "error": error}})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, error)
+    return _complete_inline(db, scan, stats)
+
+
+@router.get("", response_model=list[ScanOut])
+def list_scans(limit: int = Query(50, le=200), offset: int = 0, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> list[Doc]:
+    expire_stale_scans(db, user.id)
+    return find(db, "scans", {"user_id": user.id}, sort=[("created_at", -1)], limit=limit, skip=offset)
+
+
+@router.get("/{scan_id}", response_model=ScanOut)
+def get_scan(scan_id: int, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
+    expire_stale_scans(db, user.id)
+    return _get_scan(db, user, scan_id)
+
+
+@router.get("/{scan_id}/findings", response_model=list[FindingOut])
+def scan_findings(scan_id: int, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> list[Doc]:
+    scan = _get_scan(db, user, scan_id)
+    return find(db, "findings", {"scan_id": scan.id}, sort=[("risk_score", -1)])
+
+
+@router.delete("/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_scan(scan_id: int, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> None:
+    scan = _get_scan(db, user, scan_id)
+    if scan.status == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the scan to finish before deleting it.")
+    db.findings.delete_many({"scan_id": scan.id})
+    db.alerts.update_many({"scan_id": scan.id}, {"$set": {"scan_id": None}})
+    db.scans.delete_one({"_id": scan.id})
