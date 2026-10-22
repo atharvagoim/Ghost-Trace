@@ -1,3 +1,4 @@
+import re
 """Async GitHub API client used by the scanner (repo listing, trees, file contents, commit diffs)."""
 
 import asyncio
@@ -169,6 +170,10 @@ class GitHubClient:
         return {"limit": core.get("limit"), "remaining": core.get("remaining"), "reset": core.get("reset")}
 
 
+OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
 def parse_repo_target(target: str) -> str:
     """Accepts 'owner/repo', 'https://github.com/owner/repo(.git)' and returns 'owner/repo'."""
     t = target.strip().removesuffix("/").removesuffix(".git")
@@ -179,7 +184,10 @@ def parse_repo_target(target: str) -> str:
     parts = [p for p in t.split("/") if p]
     if len(parts) < 2:
         raise GitHubError("Enter a repository as owner/name or a github.com URL.")
-    return f"{parts[0]}/{parts[1]}"
+    owner, repo = parts[0], parts[1]
+    if not OWNER_RE.match(owner) or not REPO_RE.match(repo) or repo in (".", ".."):
+        raise GitHubError("That doesn't look like a GitHub repository name.")
+    return f"{owner}/{repo}"
 
 
 def parse_owner_target(target: str) -> str:
@@ -191,4 +199,6 @@ def parse_owner_target(target: str) -> str:
     owner = t.split("/")[0]
     if not owner:
         raise GitHubError("Enter a GitHub username or organization.")
+    if not OWNER_RE.match(owner):
+        raise GitHubError("That doesn't look like a GitHub username or organization.")
     return owner

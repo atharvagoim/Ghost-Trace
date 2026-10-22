@@ -14,6 +14,13 @@ from .findings import filtered_query
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
+def _cell(value):
+    """Repository and file names come from other people's code. A leading = + - @ would run as a formula in Excel."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 @router.get("/findings.csv")
 def findings_csv(
     severity: str | None = None, category: str | None = None, status_: str | None = Query(None, alias="status"),
@@ -25,9 +32,10 @@ def findings_csv(
     w.writerow(["id", "severity", "risk_score", "confidence", "credential_type", "category", "status", "repository", "file_path",
                 "line", "commit", "history_only", "secret_masked", "first_seen", "url"])
     for f in rows:
-        w.writerow([f.id, f.severity, f.risk_score, f.confidence, f.credential_type, f.category, f.status, f.repository or "",
-                    f.file_path or "", f.line_number or "", f.commit_sha or "", f.in_history_only, f.secret_masked,
-                    f.first_seen.isoformat(), f.url or ""])
+        w.writerow([_cell(c) for c in (
+            f.id, f.severity, f.risk_score, f.confidence, f.credential_type, f.category, f.status, f.repository or "",
+            f.file_path or "", f.line_number or "", f.commit_sha or "", f.in_history_only, f.secret_masked,
+            f.first_seen.isoformat(), f.url or "")])
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f'attachment; filename="ghosttrace-findings-{stamp}.csv"'})

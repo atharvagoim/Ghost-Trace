@@ -1,10 +1,10 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
 from ..config import get_settings
 from ..db import Doc, find_one, get_db, insert
-from ..ratelimit import rate_limit
+from ..ratelimit import check_limit, rate_limit
 from ..schemas import ForgotPasswordIn, LoginIn, ResetPasswordIn, RegisterIn, TokenOut, UserOut, UserUpdate
 from ..security import (
     create_access_token, create_reset_token, get_current_user, hash_password, user_from_reset_token, verify_password,
@@ -26,15 +26,17 @@ def register(body: RegisterIn, db: Database = Depends(get_db)) -> TokenOut:
         })
     except DuplicateKeyError:  # two sign-ups racing for the same address
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists")
-    return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
+    return TokenOut(access_token=create_access_token(user), user=UserOut.model_validate(user))
 
 
 @router.post("/login", response_model=TokenOut, dependencies=[Depends(rate_limit("login", 10, 300))])
-def login(body: LoginIn, db: Database = Depends(get_db)) -> TokenOut:
+def login(body: LoginIn, request: Request, db: Database = Depends(get_db)) -> TokenOut:
+    # Besides the per-address limit above, cap guesses against one account however many addresses they come from.
+    check_limit("login-account", body.email.lower(), 20, 900, request)
     user = find_one(db, "users", {"email": body.email.lower()})
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
-    return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
+    return TokenOut(access_token=create_access_token(user), user=UserOut.model_validate(user))
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(rate_limit("forgot", 5, 3600))])

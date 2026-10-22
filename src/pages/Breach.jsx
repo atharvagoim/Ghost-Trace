@@ -157,15 +157,13 @@ export default function Breach() {
       {tab === 'email' ? (
         <div className="grid items-start gap-8 xl:grid-cols-[1fr_340px]">
           <div>
-            <Glass className="p-5 sm:p-6">
-              <form onSubmit={checkEmail} className="flex flex-col gap-3 sm:flex-row">
-                <div className="relative flex-1">
-                  <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-label-3" />
-                  <input className="field pl-12" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
-                </div>
-                <Button type="submit" size="lg" loading={busy}>{!busy && <MailSearch className="h-5 w-5" />} Check</Button>
-              </form>
-            </Glass>
+            <form onSubmit={checkEmail} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-label-3" />
+                <input className="field pl-12" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+              </div>
+              <Button type="submit" size="sm" loading={busy}>{!busy && <MailSearch className="h-4 w-4" />} Check</Button>
+            </form>
             <AnimatePresence mode="wait">{result && <EmailResult result={result} onMonitor={monitor} />}</AnimatePresence>
           </div>
           <Group header="Recently checked">

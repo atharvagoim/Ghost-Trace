@@ -1,11 +1,14 @@
 from functools import lru_cache
 
+import logging
 import os
+import secrets
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET = "change-me-in-production"
+MIN_SECRET_LENGTH = 32
 IN_MEMORY = "mongomock://"
 
 
@@ -102,6 +105,17 @@ class Settings(BaseSettings):
             for key, value in defaults.items():
                 if key not in explicit:
                     setattr(self, key, value)
+        if self.secret_key == DEFAULT_SECRET:
+            # The default is public (it is in the source), so anyone could forge a login token with it.
+            if not self.in_memory_db:
+                raise ValueError(
+                    "SECRET_KEY is still the public default. Set a long random value in .env "
+                    "(python -c \"import secrets; print(secrets.token_urlsafe(48))\")."
+                )
+            self.secret_key = secrets.token_urlsafe(48)  # throwaway dev database: a per-run secret is fine
+            logging.getLogger("ghosttrace").warning("SECRET_KEY is not set: using a random one for this run, so logins reset on restart.")
+        elif len(self.secret_key) < MIN_SECRET_LENGTH:
+            logging.getLogger("ghosttrace").warning("SECRET_KEY is shorter than %d characters. Use a longer random value.", MIN_SECRET_LENGTH)
         return self
 
     @property

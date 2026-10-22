@@ -5,6 +5,7 @@ from pymongo.database import Database
 
 from ..config import get_settings
 from ..db import Doc, find, find_one, get_db, insert
+from ..ratelimit import rate_limit
 from ..schemas import FindingOut, GithubScanIn, ScanOut, TextScanIn
 from ..security import get_current_user
 from ..services.alerts import alert_for_scan
@@ -34,7 +35,7 @@ def _complete_inline(db: Database, scan: Doc, stats) -> Doc:
     return scan
 
 
-@router.post("/github", response_model=ScanOut, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/github", response_model=ScanOut, status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(rate_limit("scan-github", 30, 3600))])
 def start_github_scan(body: GithubScanIn, tasks: BackgroundTasks, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
     try:
         target = parse_repo_target(body.target) if body.target_type == "github_repo" else parse_owner_target(body.target)
@@ -61,19 +62,20 @@ def run_scan(scan_id: int, include_history: bool = True, user: Doc = Depends(get
     return scan
 
 
-@router.post("/text", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
+@router.post("/text", response_model=ScanOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit("scan-text", 60, 3600))])
 def scan_text_content(body: TextScanIn, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
     scan = insert(db, "scans", new_scan(user.id, "text", body.label or "Pasted text"))
     return _complete_inline(db, scan, scan_text_blob(body.content, body.label or "pasted.txt", "text"))
 
 
-@router.post("/upload", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
+@router.post("/upload", response_model=ScanOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit("scan-upload", 30, 3600))])
 async def scan_file(file: UploadFile = File(...), label: str = Form(default=""), user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
     limit_mb = get_settings().max_upload_mb
     data = await file.read(limit_mb * 1024 * 1024 + 1)
     if len(data) > limit_mb * 1024 * 1024:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"Files must be {limit_mb} MB or smaller.")
-    name = file.filename or "upload.txt"
+    name = (file.filename or "upload.txt")[:200]
+    label = label.strip()[:200]
     scan = insert(db, "scans", new_scan(user.id, "file", label or name))
     try:
         stats = scan_upload(name, data)

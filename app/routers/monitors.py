@@ -10,6 +10,8 @@ from ..services.monitoring import run_monitor, start_monitor
 from ..services.scanner import run_github_scan
 from ..sources.github import GitHubError, parse_owner_target, parse_repo_target
 
+MAX_MONITORS = 25
+
 router = APIRouter(prefix="/api/monitors", tags=["monitors"])
 
 
@@ -39,6 +41,8 @@ def list_monitors(user: Doc = Depends(get_current_user), db: Database = Depends(
 @router.post("", response_model=MonitorOut, status_code=status.HTTP_201_CREATED)
 def create_monitor(body: MonitorIn, tasks: BackgroundTasks, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
     target = _normalize(body)
+    if db.monitors.count_documents({"user_id": user.id}) >= MAX_MONITORS:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"You can watch up to {MAX_MONITORS} targets. Remove one to add another.")
     duplicate = HTTPException(status.HTTP_409_CONFLICT, "You are already monitoring this target.")
     if find_one(db, "monitors", {"user_id": user.id, "target_type": body.target_type, "target": target}):
         raise duplicate

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 Severity = Literal["critical", "high", "medium", "low"]
 
@@ -20,16 +20,23 @@ class ORM(BaseModel):
 
 
 # ---- auth / users ----
+def _bcrypt_safe(password: str) -> str:
+    if len(password.encode()) > 72:
+        raise ValueError("Password must be 72 bytes or fewer")
+    return password
+
+
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    _check_password = field_validator("password")(_bcrypt_safe)
     full_name: str = Field(default="", max_length=200)
     organization: str = Field(default="", max_length=200)
 
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=1024)
 
 
 class ForgotPasswordIn(BaseModel):
@@ -39,6 +46,7 @@ class ForgotPasswordIn(BaseModel):
 class ResetPasswordIn(BaseModel):
     token: str = Field(min_length=10, max_length=2000)
     password: str = Field(min_length=8, max_length=128)
+    _check_password = field_validator("password")(_bcrypt_safe)
 
 
 class UserOut(ORM):

@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -25,17 +26,20 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int) -> str:
-    settings = get_settings()
-    expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
-    return jwt.encode({"sub": str(user_id), "exp": expires}, settings.secret_key, algorithm=ALGORITHM)
-
-
 RESET_TOKEN_MINUTES = 30
 
 
 def _pw_fingerprint(password_hash: str) -> str:
     return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
+
+
+def create_access_token(user: Doc) -> str:
+    """Login token. It carries a fingerprint of the current password hash, so changing or resetting the password
+    signs out every session that was opened with the old one."""
+    settings = get_settings()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
+    payload = {"sub": str(user.id), "pwf": _pw_fingerprint(user.password_hash), "exp": expires}
+    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
 def create_reset_token(user: Doc) -> str:
@@ -72,6 +76,6 @@ def get_current_user(
     except (jwt.PyJWTError, KeyError, ValueError):
         raise unauthorized
     user = find_one(db, "users", {"_id": user_id})
-    if user is None:
+    if user is None or not hmac.compare_digest(str(payload.get("pwf", "")), _pw_fingerprint(user.password_hash)):
         raise unauthorized
     return user

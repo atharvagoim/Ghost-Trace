@@ -170,11 +170,20 @@ def scan_text_blob(text: str, label: str, source_type: str) -> ScanStats:
     return stats
 
 
+MAX_ZIP_ENTRIES = 5_000
+MAX_ZIP_UNPACKED_BYTES = 200 * 1024 * 1024  # a small zip can expand a thousandfold; stop before it fills memory
+
+
 def scan_upload(filename: str, data: bytes) -> ScanStats:
     stats = ScanStats()
     if filename.lower().endswith(".zip"):
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            for info in zf.infolist():
+            infos = zf.infolist()
+            if len(infos) > MAX_ZIP_ENTRIES:
+                raise ValueError(f"The archive has more than {MAX_ZIP_ENTRIES} files")
+            if sum(i.file_size for i in infos) > MAX_ZIP_UNPACKED_BYTES:
+                raise ValueError("The archive unpacks to more than 200 MB")
+            for info in infos:
                 if info.is_dir() or info.file_size > MAX_FILE_BYTES or should_skip_path(info.filename):
                     continue
                 content = zf.read(info)
