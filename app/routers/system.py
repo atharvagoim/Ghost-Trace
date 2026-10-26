@@ -27,6 +27,7 @@ def meta() -> dict:
         "monitor_cadence": "daily" if s.run_scans_inline else _cadence(s.monitor_interval_minutes),
         "scan_time_limit_seconds": s.scan_time_budget_seconds or None,
         "persistent_storage": not s.in_memory_db,
+        "ai_enabled": s.ai_enabled,
     }
 
 

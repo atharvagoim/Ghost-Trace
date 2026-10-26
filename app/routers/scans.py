@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pymongo.database import Database
 
 from ..config import get_settings
@@ -9,7 +9,10 @@ from ..ratelimit import rate_limit
 from ..schemas import FindingOut, GithubScanIn, ScanOut, TextScanIn
 from ..security import get_current_user
 from ..services.alerts import alert_for_scan
-from ..services.scanner import expire_stale_scans, new_scan, persist_hits, run_github_scan, scan_text_blob, scan_upload
+from ..services.scanner import (
+    expire_stale_scans, new_scan, persist_hits, run_github_scan, scan_local_repo, scan_text_blob, scan_upload,
+)
+from ..sources.localrepo import LocalRepoError
 from ..sources.github import GitHubError, parse_owner_target, parse_repo_target
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
@@ -84,6 +87,58 @@ async def scan_file(file: UploadFile = File(...), label: str = Form(default=""),
         db.scans.update_one({"_id": scan.id}, {"$set": {"status": "failed", "error": error}})
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, error)
     return _complete_inline(db, scan, stats)
+
+
+@router.post("/local", response_model=ScanOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit("scan-local", 30, 3600))])
+async def scan_local_repository(request: Request, name: str = Query("repository.zip", max_length=200), label: str = Query("", max_length=200),
+                                history: bool = True, user: Doc = Depends(get_current_user), db: Database = Depends(get_db)) -> Doc:
+    """Scan a zipped local repository, including its git history when the zip contains the .git folder.
+
+    The zip is sent as the raw request body (not multipart), read into memory and never written to disk: multipart
+    uploads over 1 MB are spooled to a temporary file, which this endpoint avoids. Only masked findings are saved.
+    """
+    limit = get_settings().max_upload_mb * 1024 * 1024
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"Zips must be {get_settings().max_upload_mb} MB or smaller.")
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf += chunk
+        if len(buf) > limit:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"Zips must be {get_settings().max_upload_mb} MB or smaller.")
+    if not buf:
+        raise HTTPException(422, "The upload was empty.")
+    filename = name.replace("\\", "/").rsplit("/", 1)[-1] or "repository.zip"
+    scan = insert(db, "scans", new_scan(user.id, "local_repo", label.strip() or filename.removesuffix(".zip"), message="Reading the zip"))
+    try:
+        stats, repo_name, had_git = scan_local_repo(filename, bytes(buf), include_history=history)
+    except LocalRepoError as exc:
+        db.scans.update_one({"_id": scan.id}, {"$set": {"status": "failed", "error": str(exc), "finished_at": datetime.now(timezone.utc)}})
+        raise HTTPException(422, str(exc))
+    except Exception as exc:  # noqa: BLE001 - corrupt git data etc.
+        error = f"Could not read the repository: {exc}"
+        db.scans.update_one({"_id": scan.id}, {"$set": {"status": "failed", "error": error, "finished_at": datetime.now(timezone.utc)}})
+        raise HTTPException(422, error)
+    finally:
+        del buf  # drop the archive bytes as soon as the scan is done
+
+    db.scans.update_one({"_id": scan.id}, {"$set": {"status": "running", "started_at": datetime.now(timezone.utc)}})
+    findings = persist_hits(db, scan, stats.hits)
+    if had_git and history:
+        summary = f"Scanned {stats.files} files and {stats.commits} commits of {repo_name}"
+    elif had_git:
+        summary = f"Scanned {stats.files} files of {repo_name} (history skipped)"
+    else:
+        summary = f"Scanned {stats.files} files of {repo_name}. No .git folder in the zip, so history was not checked"
+    if stats.truncated:
+        summary += " (stopped early at the time limit; showing what was found so far)"
+    db.scans.update_one({"_id": scan.id}, {"$set": {
+        "files_scanned": stats.files, "commits_scanned": stats.commits, "repos_scanned": 1, "status": "completed", "progress": 100,
+        "finished_at": datetime.now(timezone.utc), "message": summary,
+    }})
+    scan = find_one(db, "scans", {"_id": scan.id})
+    alert_for_scan(db, scan, findings)
+    return scan
 
 
 @router.get("", response_model=list[ScanOut])

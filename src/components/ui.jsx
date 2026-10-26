@@ -116,7 +116,7 @@ export function Segmented({ options, value, onChange, className, size = 'md' }) 
         const Icon = o.icon
         return (
           <button key={o.value} type="button" role="tab" aria-selected={active} onClick={() => onChange(o.value)}
-            className={clsx('relative flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-[12px] px-2 font-medium transition-colors',
+            className={clsx('relative flex flex-[1_1_auto] items-center justify-center gap-1.5 whitespace-nowrap rounded-[12px] px-2.5 font-medium transition-colors',
               size === 'sm' ? 'h-7 text-footnote' : 'h-8 text-subhead', active ? 'text-label' : 'text-label-2 hover:text-label')}>
             {active && (
               <motion.span layoutId={`seg-${id}`} transition={spring}
@@ -320,7 +320,7 @@ export function Sheet({ open, onClose, title, children, footer, wide }) {
           <motion.aside
             className={clsx('glass-thick absolute flex flex-col overflow-hidden',
               'inset-x-0 bottom-0 max-h-[92dvh] rounded-t-sheet pb-[env(safe-area-inset-bottom)]',
-              'md:inset-y-3 md:left-auto md:right-3 md:max-h-none md:rounded-sheet md:pb-0', wide ? 'md:w-[560px]' : 'md:w-[480px]')}
+              'md:inset-y-3 md:left-auto md:right-3 md:max-h-none md:rounded-sheet md:pb-0', wide ? 'md:w-[min(760px,calc(100vw-24px))]' : 'md:w-[480px]')}
             initial={from} animate={to} exit={from} transition={spring}
             drag={!desktop && !reduce ? 'y' : false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.6 }}
             onDragEnd={(_, info) => { if (info.offset.y > 120 || info.velocity.y > 600) onClose() }}

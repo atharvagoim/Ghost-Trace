@@ -25,6 +25,7 @@ export const TARGET_LABELS = {
   github_repo: 'GitHub repository',
   text: 'Pasted text',
   file: 'Uploaded file',
+  local_repo: 'Local repository',
   email: 'Email address',
 }
 

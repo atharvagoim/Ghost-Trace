@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { AnimatePresence, motion } from 'motion/react'
-import { Building2, ClipboardPaste, FileArchive, FolderGit2, History, Radar, Trash2, Upload, User as UserIcon } from 'lucide-react'
+import { Building2, ClipboardPaste, FileArchive, FolderGit2, HardDrive, History, Lock, Radar, Trash2, Upload, User as UserIcon } from 'lucide-react'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/meta'
 import { Github } from '../components/icons'
@@ -24,6 +24,7 @@ function NewScan({ onCreated }) {
   const navigate = useNavigate()
   const meta = useMeta()
   const fileRef = useRef(null)
+  const zipRef = useRef(null)
   const [mode, setMode] = useState('github')
   const [target, setTarget] = useState('')
   const [ownerType, setOwnerType] = useState('github_user')
@@ -31,11 +32,15 @@ function NewScan({ onCreated }) {
   const [text, setText] = useState('')
   const [label, setLabel] = useState('')
   const [file, setFile] = useState(null)
+  const [repoZip, setRepoZip] = useState(null)
+  const [repoHistory, setRepoHistory] = useState(true)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const parsed = useMemo(() => parseTarget(target), [target])
   const tooBig = file && file.size > meta.max_upload_mb * 1024 * 1024
+  const zipTooBig = repoZip && repoZip.size > meta.max_upload_mb * 1024 * 1024
+  const notZip = repoZip && !/\.zip$/i.test(repoZip.name)
 
   async function submit(e) {
     e.preventDefault()
@@ -46,6 +51,10 @@ function NewScan({ onCreated }) {
         const target_type = parsed.kind === 'repo' ? 'github_repo' : ownerType
         scan = await api('/api/scans/github', { method: 'POST', body: { target_type, target: parsed.value, include_history: history } })
         navigate(`/app/scans/${scan.id}?history=${history ? 1 : 0}`)
+      } else if (mode === 'local') {
+        const q = new URLSearchParams({ name: repoZip.name, label, history: repoHistory ? 'true' : 'false' })
+        scan = await api(`/api/scans/local?${q}`, { method: 'POST', blob: repoZip })
+        navigate(`/app/scans/${scan.id}`)
       } else if (mode === 'text') {
         scan = await api('/api/scans/text', { method: 'POST', body: { content: text, label: label || 'Pasted text' } })
         navigate(`/app/scans/${scan.id}`)
@@ -64,14 +73,16 @@ function NewScan({ onCreated }) {
     }
   }
 
-  const canSubmit = mode === 'github' ? Boolean(parsed.value) : mode === 'text' ? text.trim().length > 0 : file && !tooBig
+  const canSubmit = mode === 'github' ? Boolean(parsed.value) : mode === 'local' ? repoZip && !zipTooBig && !notZip
+    : mode === 'text' ? text.trim().length > 0 : file && !tooBig
 
   return (
     <Glass className="p-5 sm:p-6">
       <Segmented value={mode} onChange={setMode} options={[
         { value: 'github', label: 'GitHub', icon: Github },
+        { value: 'local', label: 'Local', icon: HardDrive },
         { value: 'text', label: 'Paste', icon: ClipboardPaste },
-        { value: 'upload', label: 'Upload', icon: Upload },
+        { value: 'upload', label: 'File', icon: Upload },
       ]} />
 
       <form onSubmit={submit} className="mt-5 space-y-4">
@@ -113,6 +124,37 @@ function NewScan({ onCreated }) {
                   </div>
                   <Switch checked={history} onChange={setHistory} label="Check commit history" />
                 </div>
+              </>
+            )}
+
+            {mode === 'local' && (
+              <>
+                <button type="button" onClick={() => zipRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
+                  onDrop={(e) => { e.preventDefault(); setDragging(false); setRepoZip(e.dataTransfer.files[0]) }}
+                  className={clsx('flex w-full flex-col items-center justify-center gap-2 rounded-group border-2 border-dashed px-6 py-9 text-center transition-colors',
+                    dragging ? 'border-tint bg-tint/10' : 'border-white/15 hover:border-white/30 hover:bg-white/[0.03]')}>
+                  <FolderGit2 className="h-9 w-9 text-tint-light" />
+                  <span className="text-headline text-label">{repoZip ? repoZip.name : 'Drop your project .zip here'}</span>
+                  <span className={clsx('text-footnote', zipTooBig || notZip ? 'text-ios-red' : 'text-label-3')}>
+                    {repoZip ? (notZip ? 'Choose a .zip file' : `${(repoZip.size / 1024 / 1024).toFixed(2)} MB${zipTooBig ? ` · over the ${meta.max_upload_mb} MB limit` : ''}`)
+                      : `Zip the project folder, including the hidden .git folder, up to ${meta.max_upload_mb} MB`}
+                  </span>
+                </button>
+                <input ref={zipRef} type="file" accept=".zip,application/zip" className="hidden" onChange={(e) => setRepoZip(e.target.files[0])} />
+                <div className="flex items-center gap-3 rounded-3xl bg-white/[0.05] px-4 py-3">
+                  <History className="h-5 w-5 shrink-0 text-ios-teal" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-callout text-label">Check commit history</div>
+                    <div className="text-footnote text-label-3">Reads every branch from the .git folder, finds secrets deleted but still committed</div>
+                  </div>
+                  <Switch checked={repoHistory} onChange={setRepoHistory} label="Check commit history" />
+                </div>
+                <p className="flex items-start gap-2 px-1 text-footnote text-label-3">
+                  <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  Scanned in memory and thrown away: the zip is never written to disk or stored. Only masked findings are saved.
+                  Tip: delete node_modules first to keep the zip small (it is skipped anyway).
+                </p>
               </>
             )}
 
@@ -193,7 +235,7 @@ export default function Scans() {
 
   return (
     <>
-      <PageHeader title="Scan" description="Check a GitHub repository, account or organization, pasted text, or a project file for exposed credentials." />
+      <PageHeader title="Scan" description="Check a GitHub repository, account or organization, a local repository zip, pasted text, or a file for exposed credentials." />
       <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,420px)_1fr]">
         <NewScan onCreated={(s) => setScans((x) => [s, ...(x || [])])} />
         <Group header="History">

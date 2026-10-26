@@ -14,8 +14,8 @@ Team: Tanmay Dabholkar, Shirshak Dange, Aayush Doke, Atharva Goim.
 
 | Area | What it does |
 | --- | --- |
-| Detection | 49 rules: AWS, GCP, Azure, GitHub, GitLab, Stripe, OpenAI, Anthropic, Slack, Twilio, SendGrid, JWT, SSH/PEM keys, database URLs, hard-coded passwords, generic keys, emails and more, plus Shannon-entropy filtering |
-| Sources | GitHub API (users, orgs, repos, last N commits per repo), pasted text, file and `.zip` uploads |
+| Detection | 74 rules: AWS, GCP, Azure (storage keys and AD client secrets), GitHub, GitLab, Stripe (incl. webhook secrets), OpenAI, Anthropic, Groq, xAI, OpenRouter, Supabase, Slack, Twilio, SendGrid, Resend, Notion, Grafana, JWT, SSH/PEM/age keys, database URLs, JDBC and ADO.NET connection strings, Gmail app passwords, `.env` passwords and tokens, generic keys, emails and more, plus Shannon-entropy filtering. A keyword prefilter skips rules that cannot match a file, about 3× faster than v1 |
+| Sources | GitHub API (users, orgs, repos, last N commits per repo), **zipped local repositories with full git history** (read in memory, never stored), pasted text, file and `.zip` uploads |
 | AI risk scoring | Gradient-boosted classifier (scikit-learn) on 24 features: entropy, length, character mix, placeholder patterns, test/docs paths, sensitive files, history-only, rule type. Outputs confidence, a 0–100 risk score, severity and human-readable reasons |
 | Breach intel | Email lookups via [XposedOrNot](https://xposedornot.com) (free) or Have I Been Pwned (with an API key); password checks via Pwned Passwords k-anonymity, so the password never leaves the server |
 | Monitoring | Scheduled re-scans of GitHub targets and emails, alerting only on credentials or breaches not seen before |
@@ -24,6 +24,7 @@ Team: Tanmay Dabholkar, Shirshak Dange, Aayush Doke, Atharva Goim.
 | Triage | Search by org/user/repo/file, filter by severity and type, mark rotated or false positive (applies to every copy of the secret) |
 | Reports | PDF summary and per-scan reports, CSV export |
 | Noise control | Skips code expressions (`os.getenv(...)`, variable names, f-strings), vendored libraries (anything beside a `*.dist-info` folder), licence/author files, and any line marked `ghosttrace:ignore` or `gitleaks:allow`; test and docs paths score lower |
+| AI Security Analyst | Groq-powered (optional): plain-English explanations, remediation plans and safe code patches for each finding, GitHub pull-request security reviews, and an executive security-posture summary. Secrets are redacted before anything leaves the server |
 | Privacy | Raw secrets are never stored; only a masked preview and a SHA-256 fingerprint |
 
 ## Stack
@@ -34,7 +35,7 @@ Everything lives in one folder:
 
 ```
 app/           FastAPI backend (Python)
-  detection/     49 detectors + entropy, masking, diff scanning
+  detection/     74 detectors + entropy, masking, diff scanning
   ml/            AI risk model (model.joblib is prebuilt and committed)
   intel/         breach lookups (XposedOrNot / HIBP / Pwned Passwords)
   sources/       GitHub API client
@@ -49,7 +50,7 @@ static/        built frontend (created by npm run build, served by the API)
 
 ## Run it locally
 
-You need **Python 3.11+** and **Node 20+**. Then, in this folder (PowerShell, Terminal, anything):
+You need **Python 3.11+** and **Node 22.12+** (or 20.19+; 24 LTS is ideal). Then, in this folder (PowerShell, Terminal, anything):
 
 ```bash
 npm run setup     # one time: Python env, all packages, and a .env with a generated SECRET_KEY
@@ -71,6 +72,52 @@ Add `GITHUB_TOKEN` there too (classic token, no scopes ticked) so GitHub allows 
 
 `npm run check` runs lint + tests + the production build, same as CI. To test against a real MongoDB:
 `TEST_MONGODB_URI=mongodb://localhost:27017 npm test`.
+
+### "Cannot find native binding" when running npm run dev
+
+Your Node is older than 22.12 / 20.19, so npm skipped Vite's bundler binary. Install the current LTS from nodejs.org,
+reopen the terminal, delete `node_modules`, and run `npm run setup` again.
+
+## Scan a local repository
+
+On the **Scan** page choose **Local repo** and drop a zip of your project folder. Include the hidden `.git` folder and
+GhostTrace also reads the commit history of every branch, finding secrets that were deleted from the code but are still
+in a commit. Files ignored by git (like `.env`) are scanned too, since they sit on your disk.
+
+The zip is sent as the raw request body and read **entirely in memory**: it is never written to disk (not even a temp
+file) and is discarded when the scan ends. Only masked findings are saved. `node_modules`, build folders and binaries
+are skipped, so delete `node_modules` before zipping to keep the upload small. Limits: 100 MB locally (4 MB on Vercel,
+whose request size cap is 4.5 MB) and the newest 1,000 commits (`LOCAL_REPO_MAX_COMMITS`).
+
+## AI Security Analyst (Groq)
+
+Add a free key from [console.groq.com/keys](https://console.groq.com/keys) to `.env` (or Vercel's environment variables):
+
+```
+GROQ_API_KEY=gsk_...
+```
+
+then run `npm run ai:check` to confirm the server can reach Groq. Without a key every AI feature is hidden and the rest of the app works as before.
+
+| Feature | Where | What the AI sees |
+| --- | --- | --- |
+| Explain | Any finding → *AI Security Analyst* → Explain | Credential type, rule, risk factors, path, redacted snippet |
+| Fix plan | Finding → Fix plan | Same as above |
+| Code patch | Finding → Code patch | Plus ±12 lines of the file from GitHub, fully redacted |
+| PR review | *AI Analyst* page → paste a PR URL | The diff (lockfiles and vendored code skipped), redacted, plus GhostTrace's own secret scan of it |
+| Posture summary | *AI Analyst* page → Summarise | Aggregate counts only: no snippets, masked values or email addresses |
+
+**How secrets are kept away from the AI.** Every request passes through `app/ai/redact.py`: GhostTrace's detection rules
+replace each match with a typed placeholder (`[REDACTED:aws_access_key_id]`), then the value of any secret-named key (`DB_PASS=…`, `"apiKey": "…"`),
+credentials in URLs, email addresses and any remaining random-looking token (letters-only ones included) are replaced too. A final guard re-checks the exact bytes about to be sent and refuses to send
+if anything secret-like is left. The model's answers are redacted the same way before they are stored or shown. Untrusted
+content is wrapped in `<untrusted>` tags and the system prompt tells the model never to follow instructions inside it.
+
+**Limits and caching.** Answers are saved in MongoDB (`ai_insights`, `pr_reviews`, `ai_posture`): every copy of the same secret
+shares one answer, a PR is re-reviewed only when its head commit changes, and the posture summary is marked stale when your data
+changes. Only real AI calls count toward the per-user limits (30 finding insights per 10 minutes, 10 PR reviews and 6 posture
+summaries per hour, 200 a day; all configurable). Groq rate limits, timeouts, a bad key or a retired model come back as clear
+messages, with automatic retry and a fallback model.
 
 ## Deploy to Vercel
 

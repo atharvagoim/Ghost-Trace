@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import ensure_indexes, get_db
-from .routers import alerts, auth, breach, dashboard, findings, monitors, reports, scans, system
+from .routers import ai, alerts, auth, breach, dashboard, findings, monitors, reports, scans, system
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ghosttrace")
@@ -75,7 +75,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for r in (auth, scans, findings, dashboard, breach, monitors, alerts, reports, system):
+for r in (auth, scans, findings, dashboard, breach, monitors, alerts, reports, system, ai):
     app.include_router(r.router)
 
 

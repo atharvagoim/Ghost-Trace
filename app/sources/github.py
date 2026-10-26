@@ -162,6 +162,24 @@ class GitHubClient:
             if f.get("patch")
         ]
 
+    async def get_pull(self, full_name: str, number: int) -> dict:
+        resp = await self._get(f"{API}/repos/{full_name}/pulls/{number}")
+        self._raise_for(resp, f"Pull request {full_name}#{number}")
+        return resp.json()
+
+    async def get_pull_files(self, full_name: str, number: int, max_files: int = 300) -> list[dict]:
+        files: list[dict] = []
+        page = 1
+        while len(files) < max_files and page <= 3:
+            resp = await self._get(f"{API}/repos/{full_name}/pulls/{number}/files", {"per_page": 100, "page": page})
+            self._raise_for(resp, f"Files of pull request {full_name}#{number}")
+            batch = resp.json()
+            files.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return files[:max_files]
+
     async def rate_limit(self) -> dict:
         resp = await self._get(f"{API}/rate_limit")
         if resp.status_code != 200:
@@ -202,3 +220,22 @@ def parse_owner_target(target: str) -> str:
     if not OWNER_RE.match(owner):
         raise GitHubError("That doesn't look like a GitHub username or organization.")
     return owner
+
+
+PR_URL_RE = re.compile(
+    r"^(?:https?://)?(?:www\.)?github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)/pull/(?P<num>\d{1,7})(?:[/?#].*)?$"
+    r"|^(?P<owner2>[^/\s#]+)/(?P<repo2>[^/\s#]+)#(?P<num2>\d{1,7})$"
+)
+
+
+def parse_pr_target(target: str) -> tuple[str, int]:
+    """Accepts https://github.com/owner/repo/pull/123 (any trailing path) or owner/repo#123."""
+    m = PR_URL_RE.match((target or "").strip())
+    if not m:
+        raise GitHubError("Enter a pull request link like https://github.com/owner/repo/pull/123.")
+    owner = m.group("owner") or m.group("owner2")
+    repo = (m.group("repo") or m.group("repo2")).removesuffix(".git")
+    number = int(m.group("num") or m.group("num2"))
+    if not OWNER_RE.match(owner) or not REPO_RE.match(repo) or repo in (".", "..") or number < 1:
+        raise GitHubError("That doesn't look like a GitHub pull request.")
+    return f"{owner}/{repo}", number

@@ -102,6 +102,14 @@ def ensure_indexes(db: Database) -> None:
     db.findings.create_index("scan_id")
     db.breach_checks.create_index([("user_id", ASCENDING), ("checked_at", DESCENDING)])
     db.alerts.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    db.ai_insights.create_index([("user_id", ASCENDING), ("kind", ASCENDING), ("fingerprint", ASCENDING)], unique=True)
+    db.pr_reviews.create_index([("user_id", ASCENDING), ("repo", ASCENDING), ("number", ASCENDING), ("head_sha", ASCENDING)])
+    db.pr_reviews.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    db.ai_posture.create_index("user_id", unique=True)
+    # Saved AI answers from older prompt/redaction versions are never served again; drop them so they don't linger.
+    from .ai.prompts import PROMPT_VERSION
+
+    db.ai_insights.delete_many({"prompt_version": {"$ne": PROMPT_VERSION}})
 
 
 def reset_client() -> None:

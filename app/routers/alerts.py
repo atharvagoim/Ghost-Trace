@@ -19,7 +19,7 @@ def list_alerts(user: Doc = Depends(get_current_user), db: Database = Depends(ge
 def alert_config(_: Doc = Depends(get_current_user)) -> dict:
     s = get_settings()
     return {"email_configured": bool(s.smtp_host), "github_token_configured": bool(s.github_token),
-            "breach_source": "Have I Been Pwned" if s.hibp_api_key else "XposedOrNot"}
+            "breach_source": "Have I Been Pwned" if s.hibp_api_key else "XposedOrNot", "ai_configured": s.ai_enabled, "ai_model": s.groq_model if s.ai_enabled else None}
 
 
 @router.post("/test")

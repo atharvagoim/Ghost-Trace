@@ -3,18 +3,20 @@ import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom'
 import clsx from 'clsx'
 import { AnimatePresence, motion } from 'motion/react'
 import { Bell, Ellipsis, House, LogOut, MailWarning, Radar, Settings, ShieldAlert, Eye, Plus } from 'lucide-react'
+import { GroqBolt, GROQ_ORANGE } from './Groq'
 import Logo from './Logo'
 import { PageLoader, Row, Sheet, spring } from './ui'
 import { useAuth } from '../lib/auth'
 import { useConfirm } from './Toast'
 
-// Five primary destinations; Alerts and Settings live one level down (sidebar footer / "More" on phones).
+// Primary destinations (the first four are phone tabs); Alerts and Settings live one level down (sidebar footer / "More" on phones).
 const PRIMARY = [
   { to: '/app', label: 'Home', icon: House, end: true, color: '#FFFFFF' },
   { to: '/app/scans', label: 'Scan', icon: Radar, color: '#BDBDBD' },
   { to: '/app/findings', label: 'Findings', icon: ShieldAlert, color: '#FFFFFF' },
   { to: '/app/breach', label: 'Breaches', icon: MailWarning, color: '#D4D4D4' },
   { to: '/app/monitors', label: 'Monitoring', icon: Eye, color: '#EDEDED' },
+  { to: '/app/analyst', label: 'AI Analyst', icon: GroqBolt, color: GROQ_ORANGE },
 ]
 const SECONDARY = [
   { to: '/app/alerts', label: 'Alerts', icon: Bell, color: '#F2F2F2' },
@@ -163,7 +165,7 @@ export default function AppLayout() {
         </div>
         <div className="space-y-6">
           <div className="glass overflow-hidden rounded-group">
-            {[PRIMARY[4], ...SECONDARY].map((n) => (
+            {[...PRIMARY.slice(4), ...SECONDARY].map((n) => (
               <div key={n.to} onClick={() => setMore(false)}><Row icon={n.icon} iconColor={n.color} title={n.label} to={n.to} /></div>
             ))}
           </div>

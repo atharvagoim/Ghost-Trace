@@ -8,7 +8,6 @@ ChartJS.defaults.color = 'rgba(235,235,245,0.45)'
 ChartJS.defaults.borderColor = 'rgba(255,255,255,0.06)'
 
 export const SEV_COLORS = { critical: '#FF5A52', high: '#FFA726', medium: '#F2D95C', low: '#5CC8FF' }
-export const SERIES = ['#5CC8FF', '#BDBDBD', '#FFA726', '#F2F2F2', '#3DDC84', '#8C8C8C', '#F2D95C', '#FF5A52', '#6E6E6E', '#E0E0E0']
 
 export const tooltip = {
   backgroundColor: '#1e1e1e',

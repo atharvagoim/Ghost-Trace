@@ -2,17 +2,19 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Bar } from 'react-chartjs-2'
 import { motion } from 'motion/react'
-import { CheckCircle2, FileDown, FolderGit2, MailWarning, Radar, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, ChevronRight, FileDown, FolderGit2, MailWarning, Radar, ShieldCheck } from 'lucide-react'
+import { GroqBadge, GroqBolt, GROQ_ORANGE } from '../components/Groq'
 import { Github as GithubLucide } from '../components/icons'
 import { api, download } from '../lib/api'
 import { SEV_COLORS, tooltip } from '../lib/charts'
 import { plural, timeAgo, TARGET_LABELS } from '../lib/format'
-import { Button, EmptyState, Glass, Group, PageHeader, PageLoader, Row, Segmented, StatusBadge, riskColor } from '../components/ui'
+import { Button, EmptyState, Glass, Group, IconTile, PageHeader, PageLoader, Row, Segmented, StatusBadge, riskColor } from '../components/ui'
 import FindingsList from '../components/FindingsList'
 import FindingDrawer from '../components/FindingDrawer'
 import ExposureRings from '../components/ExposureRings'
 import CountUp from '../components/CountUp'
 import { useAuth } from '../lib/auth'
+import { useMeta } from '../lib/meta'
 import { useToast } from '../components/Toast'
 
 function headline(t) {
@@ -46,6 +48,7 @@ function Widget({ label, value, hint, delay = 0 }) {
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const meta = useMeta()
   const navigate = useNavigate()
   const toast = useToast()
   const [data, setData] = useState(null)
@@ -143,6 +146,17 @@ export default function Dashboard() {
         <Widget label="Scans" value={t.scans} hint={`${t.monitors_active} on a schedule`} delay={0.15} />
         <Widget label="Breached emails" value={t.breached_emails} hint="of the ones you checked" delay={0.2} />
       </div>
+
+      {meta.ai_enabled && t.open > 0 && (
+        <Link to="/app/analyst" className="press glass group mt-4 flex items-center gap-3.5 rounded-group p-4 hover:bg-white/[0.04]">
+          <IconTile icon={GroqBolt} color={GROQ_ORANGE} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2.5 text-headline text-label">Ask the AI analyst <GroqBadge markClassName="h-3" /></div>
+            <div className="truncate text-subhead text-label-2">Get a posture summary and what to fix first, or review a pull request</div>
+          </div>
+          <ChevronRight className="h-4 w-4 shrink-0 text-label-4" strokeWidth={2.5} />
+        </Link>
+      )}
 
       {data.top_findings.length > 0 && (
         <Group className="mt-8" header="Fix these first" action={<Link to="/app/findings" className="text-callout text-tint-light hover:underline">See all</Link>}>

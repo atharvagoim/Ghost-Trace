@@ -17,6 +17,7 @@ const Findings = lazy(() => import('./pages/Findings'))
 const Breach = lazy(() => import('./pages/Breach'))
 const Monitors = lazy(() => import('./pages/Monitors'))
 const Alerts = lazy(() => import('./pages/Alerts'))
+const Analyst = lazy(() => import('./pages/Analyst'))
 const Settings = lazy(() => import('./pages/Settings'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
@@ -56,6 +57,7 @@ export default function App() {
             <Route path="findings" element={<Findings />} />
             <Route path="breach" element={<Breach />} />
             <Route path="monitors" element={<Monitors />} />
+            <Route path="analyst" element={<Analyst />} />
             <Route path="alerts" element={<Alerts />} />
             <Route path="settings" element={<Settings />} />
           </Route>

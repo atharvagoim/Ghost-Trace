@@ -201,6 +201,86 @@ def scan_upload(filename: str, data: bytes) -> ScanStats:
     return stats
 
 
+# ---------------------------------------------------------------- local repository zip (in memory)
+
+def scan_added_lines(new_text: str, old_text: str | None, path: str) -> list[Match]:
+    """Scan only the lines a commit introduced, reporting their real line numbers in the new file.
+
+    A set lookup instead of a full diff: O(n), and for finding newly added secrets it gives the same answer.
+    """
+    if old_text is None:
+        return scan_text(new_text, path)
+    old = set(old_text.splitlines())
+    added: list[str] = []
+    line_map: list[int] = []
+    for i, line in enumerate(new_text.splitlines(), 1):
+        if line not in old:
+            added.append(line)
+            line_map.append(i)
+    if not added:
+        return []
+    matches = scan_text("\n".join(added), path)
+    for m in matches:
+        if 0 < m.line <= len(line_map):
+            m.line = line_map[m.line - 1]
+    return matches
+
+
+def scan_local_repo(filename: str, data: bytes, include_history: bool = True) -> tuple[ScanStats, str, bool]:
+    """Scan a zipped local repository without writing anything to disk. Returns (stats, repo name, had_git)."""
+    from ..sources.localrepo import ZipGit, common_prefix, find_repo_root, open_zip, working_tree
+
+    settings = get_settings()
+    budget = settings.scan_time_budget_seconds
+    stats = ScanStats(deadline=time.monotonic() + budget if budget > 0 else None)
+    zf = open_zip(data)
+    names = [i.filename.replace("\\", "/") for i in zf.infolist()]
+    root = find_repo_root(names)
+    had_git = root is not None
+    if root is None:
+        root = common_prefix(names)
+    stem = filename.rsplit("/", 1)[-1].removesuffix(".zip") or "local repository"
+    repo_name = root.rstrip("/").rsplit("/", 1)[-1] if root else stem
+
+    files = list(working_tree(zf, root))
+    vendored = vendored_prefixes(p for p, _ in files)
+    head_fingerprints: set[str] = set()
+    for path, content in files:
+        if vendored and path.startswith(vendored):
+            continue
+        if stats.out_of_time():
+            break
+        stats.files += 1
+        for m in scan_text(content.decode("utf-8", errors="ignore"), path):
+            head_fingerprints.add(m.fingerprint)
+            stats.hits.append(RawHit(match=m, source_type="local", repository=repo_name, file_path=path, public=False))
+
+    if had_git and include_history and not stats.out_of_time():
+        git = ZipGit(zf, root + ".git/")
+        earliest: dict[str, RawHit] = {}  # fingerprint -> hit from the oldest commit that added it
+        for commit in git.history(settings.local_repo_max_commits, stats.deadline):
+            stats.commits += 1
+            for ch in commit.changes:
+                if should_skip_path(ch.path) or (vendored and ch.path.startswith(vendored)):
+                    continue
+                new = git.blob(ch.new_sha)
+                if new is None or looks_binary(new):
+                    continue
+                old = git.blob(ch.old_sha) if ch.old_sha else None
+                old_text = old.decode("utf-8", errors="ignore") if old is not None and not looks_binary(old) else None
+                for m in scan_added_lines(new.decode("utf-8", errors="ignore"), old_text, ch.path):
+                    if m.fingerprint in head_fingerprints:
+                        continue
+                    # History is walked newest to oldest, so a later sighting is an earlier commit: keep overwriting.
+                    earliest[m.fingerprint] = RawHit(
+                        match=m, source_type="local", repository=repo_name, file_path=ch.path, commit_sha=commit.sha,
+                        public=False, history_only=True,
+                    )
+        stats.hits.extend(earliest.values())
+    stats.repos = 1
+    return stats, repo_name, had_git
+
+
 # ---------------------------------------------------------------- persistence
 
 def persist_hits(db: Database, scan: Doc, hits: list[RawHit]) -> list[Doc]:

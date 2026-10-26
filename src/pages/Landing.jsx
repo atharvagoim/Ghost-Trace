@@ -81,7 +81,7 @@ function LockScreen() {
 
 const STEPS = [
   { icon: Radar, color: '#BDBDBD', title: 'Point it at your code', text: 'Paste a GitHub repo, a username or an organization, or drop in a project. Commit history is included, so deleted secrets are found too.' },
-  { icon: Brain, color: '#FFFFFF', title: 'AI sorts real from noise', text: '49 detectors find candidates. A trained model scores each one, so live production keys rise to the top and test keys and placeholders sink.' },
+  { icon: Brain, color: '#FFFFFF', title: 'AI sorts real from noise', text: '74 detectors find candidates. A trained model scores each one, so live production keys rise to the top and test keys and placeholders sink.' },
   { icon: Bell, color: '#F2F2F2', title: 'You hear about it first', text: 'Monitored repos and email addresses are re-checked on a schedule, and anything new above your threshold lands in your inbox.' },
 ]
 

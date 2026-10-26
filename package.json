@@ -4,20 +4,20 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "setup": "node scripts/setup.mjs",
-    "dev": "concurrently -k -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "setup": "node scripts/check-node.mjs && node scripts/setup.mjs",
+    "dev": "node scripts/check-node.mjs && concurrently -k -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "node scripts/py.mjs -m uvicorn app.main:app --reload --reload-dir app --port 8000",
     "dev:web": "vite",
-    "build": "vite build",
+    "build": "node scripts/check-node.mjs && vite build",
     "start": "node scripts/py.mjs -m uvicorn app.main:app --port 8000",
     "test": "node scripts/py.mjs -m pytest -q",
     "lint": "oxlint src",
-    "check": "npm run lint && npm test && npm run build"
+    "check": "npm run lint && npm test && npm run build",
+    "ai:check": "node scripts/py.mjs -m app.ai.check"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
-    "@fontsource/ibm-plex-sans": "^5.3.0",
     "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.53.0",
@@ -38,6 +38,6 @@
     "vite": "^8.3.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

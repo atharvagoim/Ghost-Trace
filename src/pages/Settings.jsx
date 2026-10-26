@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { GroqBolt, GROQ_ORANGE } from '../components/Groq'
 import { Bell, CheckCircle2, Database, Mail, ShieldCheck, XCircle } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
@@ -68,6 +69,7 @@ export default function Settings() {
             <Row icon={Github} iconColor="#2A2A2A" title="GitHub access" subtitle={config.github_token_configured ? 'Up to 5,000 requests an hour' : 'No token: 60 requests an hour, small scans only'} trailing={<Check ok={config.github_token_configured} />} />
             <Row icon={Mail} iconColor="#FFFFFF" title="Email delivery" subtitle={config.email_configured ? 'Alerts are emailed' : 'Alerts are logged, not emailed'} trailing={<Check ok={config.email_configured} />} />
             <Row icon={ShieldCheck} iconColor="#D4D4D4" title="Breach data" subtitle={config.breach_source} trailing={<Check ok />} />
+            <Row icon={GroqBolt} iconColor={GROQ_ORANGE} title="AI Security Analyst" subtitle={config.ai_configured ? `Groq · ${config.ai_model}` : 'Off: set GROQ_API_KEY to turn it on'} trailing={<Check ok={config.ai_configured} />} />
             <Row icon={Database} iconColor="#EDEDED" title="Storage" subtitle={meta.persistent_storage ? 'Saved in MongoDB' : 'In-memory: data is lost on restart. Set MONGODB_URI.'} trailing={<Check ok={meta.persistent_storage} />} />
           </Group>
         )}

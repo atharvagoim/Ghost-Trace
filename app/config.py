@@ -63,12 +63,28 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True
     cron_secret: str | None = None
 
+    # AI Security Analyst (Groq). The key stays on the server; the browser never sees it.
+    # Secrets are redacted before anything is sent (see app/ai/redact.py).
+    groq_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_fallback_model: str | None = "openai/gpt-oss-20b"  # used when the main model is busy or unavailable
+    groq_reasoning_effort: str | None = "low"  # gpt-oss models: low | medium | high; empty to omit
+    groq_timeout_seconds: float = 45.0
+    ai_max_output_tokens: int = 2048
+    ai_pr_max_diff_chars: int = 14000  # keeps a PR review inside Groq's per-minute token budget
+    ai_finding_limit_per_10min: int = 30
+    ai_pr_limit_per_hour: int = 10
+    ai_posture_limit_per_hour: int = 6
+    ai_daily_limit: int = 200  # AI calls per user per day, across all features
+
     # Serverless behaviour (switched on automatically when VERCEL=1).
     # run_scans_inline: GitHub scans run inside the browser's POST /api/scans/{id}/run request instead of a background
     # thread, which a serverless function could freeze as soon as it has responded.
     run_scans_inline: bool = False
     scan_time_budget_seconds: int = 0  # stop and keep what was found after this long (0 = no limit)
-    max_upload_mb: int = 20  # Vercel caps request bodies at 4.5 MB
+    max_upload_mb: int = 100  # Vercel caps request bodies at 4.5 MB (lowered automatically there)
+    local_repo_max_commits: int = 1000  # commits of history read from a zipped local repository
     stale_scan_minutes: int = 120  # scans stuck longer than this are marked failed
 
     @field_validator("mongodb_uri", mode="before")
@@ -117,6 +133,15 @@ class Settings(BaseSettings):
         elif len(self.secret_key) < MIN_SECRET_LENGTH:
             logging.getLogger("ghosttrace").warning("SECRET_KEY is shorter than %d characters. Use a longer random value.", MIN_SECRET_LENGTH)
         return self
+
+    @field_validator("groq_api_key", "groq_fallback_model", "groq_reasoning_effort", mode="before")
+    @classmethod
+    def _blank_is_none(cls, v):
+        return v.strip() if isinstance(v, str) and v.strip() else None
+
+    @property
+    def ai_enabled(self) -> bool:
+        return bool(self.groq_api_key)
 
     @property
     def in_memory_db(self) -> bool:

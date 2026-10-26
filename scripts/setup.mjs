@@ -15,8 +15,8 @@ const fail = (msg) => { console.error(`\n✗ ${msg}\n`); process.exit(1) }
 const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts })
 
 // 1. Node
-const [nodeMajor] = process.versions.node.split('.').map(Number)
-if (nodeMajor < 20) fail(`Node ${process.versions.node} is too old. Install Node 20 or newer from https://nodejs.org`)
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number)
+if (!((nodeMajor === 20 && nodeMinor >= 19) || (nodeMajor === 22 && nodeMinor >= 12) || nodeMajor >= 23)) fail(`Node ${process.versions.node} is too old. Install Node 22.12+ or 24 LTS from https://nodejs.org`)
 
 // 2. A Python 3.11+ to build the virtual environment from
 function findPython() {
@@ -51,7 +51,7 @@ if (!venvWorks) {
 
 // 4. Python packages
 step('Installing Python packages (first time takes a few minutes)')
-const pip = run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-q', '-r', 'requirements.txt'], { stdio: 'inherit' })
+const pip = run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-q', '-r', 'requirements-dev.txt'], { stdio: 'inherit' })
 if (pip.status !== 0) fail('Installing Python packages failed. The error is shown above.')
 
 // 5. JavaScript packages (always run: it is quick when nothing changed, and picks up package.json updates)

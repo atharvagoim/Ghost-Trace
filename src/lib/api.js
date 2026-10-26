@@ -23,12 +23,16 @@ function errorMessage(data, fallback) {
   return fallback
 }
 
-export async function api(path, { method = 'GET', body, form, raw } = {}) {
+export async function api(path, { method = 'GET', body, form, blob, raw } = {}) {
   const headers = {}
   const token = tokenStore.get()
   if (token) headers.Authorization = `Bearer ${token}`
   let payload
   if (form) payload = form
+  else if (blob) {
+    headers['Content-Type'] = blob.type || 'application/octet-stream' // sent as the raw body: never spooled to disk on the server
+    payload = blob
+  }
   else if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
     payload = JSON.stringify(body)

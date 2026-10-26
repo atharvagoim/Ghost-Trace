@@ -61,7 +61,7 @@ def score_all(items: list[tuple[FindingContext, str, str | None, str]]) -> list[
 
 def _score(ctx: FindingContext, rule_name: str, file_path: str | None, source: str, confidence: float) -> Score:
     exposure = 1.0 if ctx.public else 0.75
-    if source in ("text", "file"):
+    if source in ("text", "file", "local"):
         exposure = 0.8
     if ctx.history_only:
         exposure *= 0.85
@@ -92,5 +92,7 @@ def _score(ctx: FindingContext, rule_name: str, file_path: str | None, source: s
         factors.append("Removed from the latest code but still in git history")
     if source == "github":
         factors.append("Public repository" if ctx.public else "Private repository")
+    elif source == "local":
+        factors.append("Local repository (scanned in memory; the zip was not stored)")
     factors.append(f"AI confidence it is a real secret: {round(confidence * 100)}%")
     return Score(confidence=round(confidence, 4), risk=risk, severity=severity_for(risk), factors=factors)

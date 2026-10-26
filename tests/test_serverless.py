@@ -70,7 +70,7 @@ def test_health_reports_database(client):
 
 def test_meta_and_upload_limit(auth_client, monkeypatch):
     meta = auth_client.get("/api/meta").json()
-    assert meta["max_upload_mb"] == 20 and meta["serverless"] is False
+    assert meta["max_upload_mb"] == 100 and meta["serverless"] is False
     monkeypatch.setattr(get_settings(), "max_upload_mb", 1)
     big = b"x" * (1024 * 1024 + 10)
     r = auth_client.post("/api/scans/upload", files={"file": ("big.txt", big)})

@@ -4,6 +4,7 @@ import { Button, RiskMeter, SeverityBadge, Sheet, StatusBadge, riskColor } from 
 import { api } from '../lib/api'
 import { formatDate } from '../lib/format'
 import { useToast } from './Toast'
+import AIPanel from './AIPanel'
 
 const REMEDIATION = {
   aws: ['Deactivate the key in AWS IAM.', 'Create a replacement key and update your deployments.', 'Check CloudTrail for activity from the leaked key.'],
@@ -17,6 +18,8 @@ const REMEDIATION = {
   email: ['Look the address up in Breaches.', 'Decide whether it should be public at all.'],
   webhook: ['Regenerate the webhook URL so the leaked one stops working.'],
 }
+
+const SOURCE_LABEL = { github: 'GitHub', local: 'Local repository', file: 'Uploaded file', text: 'Pasted text' }
 
 function Stat({ label, value, color }) {
   return (
@@ -87,10 +90,12 @@ export default function FindingDrawer({ finding, onClose, onChange }) {
                 </li>
               ))}
             </ol>
-            {f.source_type === 'github' && (
+            {(f.source_type === 'github' || f.source_type === 'local') && (
               <p className="mt-3 text-footnote text-label-2">Deleting the file is not enough: the secret stays in git history until you rotate it.</p>
             )}
           </section>
+
+          <AIPanel key={f.id} finding={f} />
 
           <section>
             <h3 className="field-label">Why it scored {Math.round(f.risk_score)}</h3>
@@ -129,8 +134,14 @@ export default function FindingDrawer({ finding, onClose, onChange }) {
             <div><dt className="text-footnote text-label-3">First seen</dt><dd className="text-label">{formatDate(f.first_seen)}</dd></div>
             <div><dt className="text-footnote text-label-3">Last seen</dt><dd className="text-label">{formatDate(f.last_seen)}</dd></div>
             <div><dt className="text-footnote text-label-3">Detector</dt><dd className="font-mono text-footnote text-label">{f.rule_id}</dd></div>
-            <div><dt className="text-footnote text-label-3">Source</dt><dd className="capitalize text-label">{f.source_type}</dd></div>
+            <div><dt className="text-footnote text-label-3">Source</dt><dd className="text-label">{SOURCE_LABEL[f.source_type] || f.source_type}</dd></div>
           </dl>
+
+          {!f.url && f.commit_sha && (
+            <p className="flex items-center gap-2 rounded-3xl bg-white/[0.05] px-4 py-3 font-mono text-footnote text-label-2">
+              <GitCommit className="h-4 w-4 shrink-0" /> Added in commit {f.commit_sha.slice(0, 10)}
+            </p>
+          )}
 
           {f.url && (
             <Button as="a" href={f.url} target="_blank" rel="noreferrer" variant="tinted" className="w-full">

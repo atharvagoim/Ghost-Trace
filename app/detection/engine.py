@@ -25,7 +25,8 @@ IGNORE_MARKER_RE = re.compile(r"(?i)(ghosttrace:ignore|gitleaks:allow|pragma: al
 CODE_VALUE_RE = re.compile(
     r"[()\[\]{}]|[,;]$|^\$|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$|^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$"
 )
-NON_SPECIFIC_CODE_CHECK = {"password_assignment", "env_password", "generic_api_key", "basic_auth_url"}
+NON_SPECIFIC_CODE_CHECK = {"password_assignment", "env_password", "env_token", "generic_api_key", "basic_auth_url", "connection_string_password"}
+ENV_FILE_RULES = {"env_password", "env_token"}  # NAME=value rules; in source code these lines are assignments
 SKIP_FILES = {
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile.lock", "composer.lock",
     "Cargo.lock", "go.sum", "Gemfile.lock", "bun.lockb",
@@ -183,12 +184,17 @@ def scan_text(text: str, path: str | None = None, include_emails: bool = True) -
     dot = name.rfind(".")
     is_code_file = dot != -1 and name[dot:].lower() in CODE_EXT
     starts = _line_starts(text)
+    lower = text.lower()
+    # Lines carrying an ignore marker, found in one pass instead of one regex per match.
+    ignored_lines = {bisect.bisect_right(starts, m.start()) - 1 for m in IGNORE_MARKER_RE.finditer(text)} if "ignore" in lower or "allow" in lower or "nosecret" in lower else set()
     raw: list[Match] = []
     for rule in RULES:
         if rule.category == "email" and not include_emails:
             continue
-        if rule.id == "env_password" and is_code_file:
-            continue  # NAME=value lines in source code are assignments; password_assignment covers literals
+        if rule.id in ENV_FILE_RULES and is_code_file:
+            continue
+        if rule.keywords and not any(k in lower for k in rule.keywords):
+            continue  # cheap substring prefilter: the regex cannot match without one of these
         for m in rule.pattern.finditer(text):
             secret = m.group(rule.group)
             if not secret:
@@ -204,7 +210,11 @@ def scan_text(text: str, path: str | None = None, include_emails: bool = True) -
                 continue
             if not rule.specific and rule.category != "email" and is_code_reference(secret, text, s, e, path):
                 continue
-            if IGNORE_MARKER_RE.search(line_text):
+            if line_idx in ignored_lines:
+                continue
+            if rule.deny is not None and rule.deny.search(line_text):
+                continue
+            if rule.require is not None and not rule.require.search(line_text):
                 continue
             if rule.id in NON_SPECIFIC_CODE_CHECK and is_code_value(secret):
                 continue
@@ -236,6 +246,21 @@ def scan_text(text: str, path: str | None = None, include_emails: bool = True) -
         seen.add(key)
         kept.append(m)
     kept.sort(key=lambda x: x.start)
+
+    # A snippet is built around one secret; if its line holds other secrets too, mask those as well,
+    # otherwise the stored preview (and anything shown or sent onward) would carry them in the clear.
+    by_line: dict[int, list[Match]] = {}
+    for m in kept:
+        by_line.setdefault(m.line, []).append(m)
+    for group in by_line.values():
+        if len(group) > 1:
+            for m in group:
+                snippet = m.snippet
+                for other in group:
+                    first = other.secret.splitlines()[0] if other.secret else ""
+                    if first and first in snippet:
+                        snippet = snippet.replace(first, mask_secret(other.secret, other.rule.category))
+                m.snippet = snippet
     return kept
 
 
